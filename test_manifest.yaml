@@ -1,0 +1,104 @@
+---
+apiVersion: mongodbcommunity.mongodb.com/v1
+kind: MongoDBCommunity
+metadata:
+  name: my-mongodb
+  namespace: default
+spec:
+  members: 3
+  type: ReplicaSet
+  version: "3.4.24"
+  security:
+    authentication:
+      modes:
+      - SCRAM-SHA-1
+  users:
+  - name: admin-user
+    db: admin
+    passwordSecretRef:
+      name: admin-user-password
+    roles:
+    - name: clusterAdmin
+      db: admin
+    - name: userAdminAnyDatabase
+      db: admin
+    scramCredentialsSecretName: my-scram
+  additionalMongodConfig:
+    storage.wiredTiger.engineConfig.journalCompressor: zlib
+  statefulSet:
+    spec:
+      template:
+        spec:
+          terminationGracePeriodSeconds: 10
+          containers:
+          - name: mongod
+            ports:
+              - containerPort: 27017
+            volumeMounts:
+            - name: mongodb-storage
+              mountPath: /data/db
+            - name: log-storage
+              mountPath: /log
+            resources:
+              limits:
+                cpu: "1"
+                memory: 2Gi
+              requests:
+                cpu: 500m
+                memory: 1Gi
+          initContainers:
+          - command:
+              - chown
+              - -R
+              - "2000"
+              - /data
+              - /logs
+            image: busybox
+            volumeMounts:
+            - mountPath: /data
+              name: data-volume
+            - mountPath: /logs
+              name: logs-volume
+            securityContext:
+              runAsNonRoot: false
+              runAsUser: 0
+              runAsGroup: 0
+            name: change-dir-permissions
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                    - my-mongodb
+                topologyKey: "kubernetes.io/hostname"      
+      volumeClaimTemplates:
+      - metadata:
+          name: mongodb-storage
+        annotations:
+          volume.beta.kubernetes.io/storage-class: "standard"
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+      - metadata:
+          name: log-storage
+        annotations:
+          volume.beta.kubernetes.io/storage-class: "standard"
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: admin-user-password
+  namespace: default
+type: Opaque
+stringData:
+  password: admin
